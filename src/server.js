@@ -1,98 +1,67 @@
-const express = require("express");
-const path = require("path");
-const { default: mongoose } = require("mongoose");
-const User = require("./models/users.model");
-const passport = require("passport");
 const cookieSession = require("cookie-session");
-const {
-  checkAuthenticated,
-  checkNotAuthenticated,
-} = require("./middleware/auth");
-
+const express = require("express");
+const { default: mongoose } = require("mongoose");
+const passport = require("passport");
 const app = express();
-const PORT = 3000;
+const path = require("path");
 
-const cookieEncryptionKey = "super-secretKey";
+const config = require("config");
+const mainRouter = require("./routes/main.router");
+const usersRouter = require("./routes/users.router");
+const serverConfig = config.get("server");
+
+const port = serverConfig.port;
+
+require("dotenv").config();
+
 app.use(
   cookieSession({
-    name: "cookie-sessionName",
-    keys: [cookieEncryptionKey],
+    name: "cookie-session-name",
+    keys: [process.env.COOKIE_ENCRYPTION_KEY],
   })
 );
+
+// register regenerate & save after the cookieSession middleware initialization
+app.use(function (request, response, next) {
+  if (request.session && !request.session.regenerate) {
+    request.session.regenerate = (cb) => {
+      cb();
+    };
+  }
+  if (request.session && !request.session.save) {
+    request.session.save = (cb) => {
+      cb();
+    };
+  }
+  next();
+});
 
 app.use(passport.initialize());
 app.use(passport.session());
 require("./config/passport");
 
 app.use(express.json());
-app.use("/static", express.static(path.join(__dirname, "public")));
+app.use(express.urlencoded({ extended: false }));
+
+// view engine setup
 app.set("views", path.join(__dirname, "views"));
 app.set("view engine", "ejs");
 
-app.use(express.urlencoded({ extended: false }));
 mongoose.set("strictQuery", false);
 mongoose
-  .connect(
-    `mongodb+srv://gwgw:qwer1234@cluster0.r4kcqgh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
-  )
-  .then(() => console.log("mongodb connected"))
-  .catch((err) => console.log(err));
-
-app.get("/", checkAuthenticated, (req, res) => {
-  res.render("index");
-});
-
-app.get("/login", checkNotAuthenticated, (req, res) => {
-  res.render("login");
-});
-
-app.post("/login", (req, res, next) => {
-  passport.authenticate("local", (err, user, info) => {
-    if (err) {
-      return next(err);
-    }
-
-    if (!user) {
-      console.log("no user found");
-      return res.json({ msg: info });
-    }
-
-    req.login(user, function (err) {
-      if (err) {
-        return next(err);
-      }
-      res.redirect("/");
-    });
-  })(req, res, next);
-});
-
-app.post("/logout", (req, res, next) => {
-  req.logOut(function (err) {
-    if (err) {
-      return next(err);
-    }
-    res.redirect("/login");
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("mongodb connected");
+  })
+  .catch((err) => {
+    console.log(err);
   });
-});
 
-app.get("/signup", checkNotAuthenticated, (req, res) => {
-  res.render("signup");
-});
+app.use("/static", express.static(path.join(__dirname, "../public")));
 
-app.post("/signup", async (req, res) => {
-  //유저 객체 생성
-  const user = new User(req.body);
-  try {
-    // 유저 컬렉션에 유저를 저장한다
-    await user.save();
-    return res.status(200).json({
-      success: true,
-    });
-  } catch (error) {
-    console.log(error);
-  }
-});
+app.use("/", mainRouter);
+app.use("/auth", usersRouter);
 
-app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+app.listen(port, () => {
+  console.log(`Listening on ${port}`);
 });
